@@ -1,0 +1,16 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+*.iml
+.vscode/
+
+# Build
+target/
+*.class
+*.log
+
+# Local configuration and secrets (see .env.example)
+.env
+application-local.yaml
