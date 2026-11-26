@@ -67,12 +67,43 @@ class LegacyRateImport implements ApplicationRunner {
         Report report = transaction.execute(status -> {
             Report result = new Report();
             importRates(result);
+            importCostSharing(result);
             return result;
         });
         log.info("Legacy rate import done: {}", report);
     }
 
     record LegacyPrice(BigDecimal price, String rateSchedule) {
+    }
+
+    /**
+     * The legacy descuento table (moderator fee and copay by company and level) as cost-sharing rules
+     * from today (siiso-docs ADR 0024). Only for a company and level that have no rule yet, so it never
+     * overwrites a rule changed here.
+     */
+    void importCostSharing(Report report) {
+        LocalDate today = LocalDate.now(clock);
+        legacy.sql("SELECT CDGEMPRESA, CODNIVEL, CUOTA_MODERADA, CUOTA_COPAGO FROM descuento").query(rs -> {
+            String level = rs.getString("CODNIVEL") == null ? "" : rs.getString("CODNIVEL").trim();
+            if (!level.matches("[1-3]")) {
+                report.skipped.add("descuento " + rs.getString("CDGEMPRESA") + "/" + level);
+                return;
+            }
+            int inserted = target.sql("""
+                            INSERT INTO billing_cost_sharing_rule (organization_id, cost_sharing_level, moderator_fee,
+                                                                   copay_percent, valid_from)
+                            SELECT o.id, :level, :fee, :copay, :today FROM organization_directory_view o
+                             WHERE o.code = :company
+                               AND NOT EXISTS (SELECT 1 FROM billing_cost_sharing_rule r
+                                                WHERE r.organization_id = o.id AND r.cost_sharing_level = :level)""")
+                    .param("level", Integer.parseInt(level))
+                    .param("fee", java.math.BigDecimal.valueOf(rs.getDouble("CUOTA_MODERADA")).setScale(2, java.math.RoundingMode.HALF_UP))
+                    .param("copay", java.math.BigDecimal.valueOf(rs.getDouble("CUOTA_COPAGO")).setScale(2, java.math.RoundingMode.HALF_UP))
+                    .param("today", java.sql.Date.valueOf(today))
+                    .param("company", rs.getString("CDGEMPRESA").trim())
+                    .update();
+            report.costSharingRules += inserted;
+        });
     }
 
     void importRates(Report report) {
@@ -204,6 +235,8 @@ class LegacyRateImport implements ApplicationRunner {
         int companiesAssigned;
         int companiesKept;
         int unusedRowsOfDependentCompanies;
+        int costSharingRules;
+        final List<String> skipped = new java.util.ArrayList<>();
         final Set<String> plansKept = new TreeSet<>();
         final Set<String> companiesWithoutRates = new TreeSet<>();
         final Set<String> unknownServices = new TreeSet<>();
@@ -215,7 +248,8 @@ class LegacyRateImport implements ApplicationRunner {
                     + ", companiesAssigned=" + companiesAssigned + ", companiesKept(handled here)=" + companiesKept
                     + ", plansKept(edited here)=" + plansKept + ", companiesWithoutRates=" + companiesWithoutRates.size()
                     + ", unusedRowsOfDependentCompanies=" + unusedRowsOfDependentCompanies
-                    + ", rowsOfUnknownCompanies=" + rowsOfUnknownCompanies + ", unknownServices=" + unknownServices;
+                    + ", rowsOfUnknownCompanies=" + rowsOfUnknownCompanies + ", unknownServices=" + unknownServices
+                    + ", costSharingRules=" + costSharingRules + ", skipped=" + skipped;
         }
     }
 }

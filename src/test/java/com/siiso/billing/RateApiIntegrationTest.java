@@ -78,6 +78,37 @@ class RateApiIntegrationTest {
     }
 
     @Test
+    void anOrderGetsThePriceOfEachLinePayerAndTheCostSharingRule() {
+        createPlan("ORDENES");
+        send("PUT", MANAGER, "/rate-plans/ORDENES/prices", """
+                {"valid_from": "2026-12-01", "changes": [{"service_code": "4001", "price": 42000}]}""");
+        send("PUT", MANAGER, "/companies/81/plan", """
+                {"plan_code": "ORDENES", "valid_from": "2026-12-01"}""");
+        jdbc.sql("""
+                INSERT INTO billing_cost_sharing_rule (organization_id, cost_sharing_level, moderator_fee, copay_percent,
+                                                       copay_cap_per_event, valid_from)
+                VALUES (81, 2, 6100, 4, 50000, '2026-01-01')""").update();
+        String body = """
+                {"date": "2026-12-01", "organization_id": 81, "cost_sharing_level": 2,
+                 "lines": [{"payer_organization_id": 81, "service_code": "4001"},
+                           {"payer_organization_id": 81, "service_code": "1002"}]}""";
+
+        MvcTestResult quote = send("POST", TOKENS.staffToken(List.of("ORDERS:CREATE")), "/order-prices", body);
+
+        assertThat(quote).hasStatusOk();
+        assertThat(quote).bodyJson().extractingPath("$.prices[0].price").isEqualTo(42000.0);
+        assertThat(quote).bodyJson().extractingPath("$.prices[0].source").isEqualTo("PLAN");
+        assertThat(quote).bodyJson().extractingPath("$.unpriced[0].service_code").isEqualTo("1002");
+        assertThat(quote).bodyJson().extractingPath("$.cost_sharing.moderator_fee").isEqualTo(6100.0);
+        assertThat(quote).bodyJson().extractingPath("$.cost_sharing.copay_cap_per_event").isEqualTo(50000.0);
+        assertThat(send("POST", READER, "/order-prices", body)).as("needs the ORDERS module").hasStatus(403);
+        MvcTestResult offered = send("GET", TOKENS.staffToken(List.of("ORDERS:READ")),
+                "/order-prices/services?organization_id=81&date=2026-12-01", null);
+        assertThat(offered).bodyJson().extractingPath("$[*].code").as("only what the company has a price for")
+                .isEqualTo(List.of("4001"));
+    }
+
+    @Test
     void aCompanyPaysItsOwnPriceOtherwiseTheOneOfItsPlan() {
         createPlan("DIAMANTE");
         assertThat(send("PUT", MANAGER, "/rate-plans/DIAMANTE/prices", """

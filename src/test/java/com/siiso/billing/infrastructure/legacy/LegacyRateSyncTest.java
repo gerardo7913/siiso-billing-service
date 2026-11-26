@@ -129,10 +129,23 @@ class LegacyRateSyncTest {
     }
 
     @Test
+    @Order(1)
+    void descuentoBecomesCostSharingRules() {
+        assertThat(target.sql("""
+                        SELECT CONCAT_WS('|', r.cost_sharing_level, r.moderator_fee, r.copay_percent)
+                          FROM billing_cost_sharing_rule r JOIN organization o ON o.id = r.organization_id
+                         WHERE o.code = '0080' ORDER BY r.cost_sharing_level""").query(String.class).list())
+                .containsExactly("1|3200.00|2.00", "2|6100.00|4.00");
+    }
+
+    @Test
     @Order(2)
     void importingAgainChangesNothing() {
         int before = target.sql("SELECT COUNT(*) FROM billing_rate_plan_price").query(Integer.class).single();
+        target.sql("UPDATE billing_cost_sharing_rule SET moderator_fee = 3500 WHERE cost_sharing_level = 1").update();
         legacyImport.run(null);
+        assertThat(target.sql("SELECT moderator_fee FROM billing_cost_sharing_rule WHERE cost_sharing_level = 1")
+                .query(java.math.BigDecimal.class).single()).as("a rule changed here stays").isEqualByComparingTo("3500");
         assertThat(target.sql("SELECT COUNT(*) FROM billing_rate_plan_price").query(Integer.class).single())
                 .isEqualTo(before);
     }

@@ -413,6 +413,20 @@ public class JdbcRateStore implements RateStore {
                 .list();
     }
 
+    @Override
+    public java.util.Optional<com.siiso.billing.domain.CostSharingRule> costSharingRule(long organizationId, int level,
+                                                                                       LocalDate date) {
+        return jdbc.sql("""
+                        SELECT moderator_fee, copay_percent, copay_cap_per_event FROM billing_cost_sharing_rule
+                         WHERE organization_id = :organization AND cost_sharing_level = :level
+                           AND valid_from <= :date AND (valid_until IS NULL OR valid_until >= :date)
+                         ORDER BY valid_from DESC LIMIT 1""")
+                .param("organization", organizationId).param("level", level).param("date", Date.valueOf(date))
+                .query((rs, row) -> new com.siiso.billing.domain.CostSharingRule(rs.getBigDecimal(1),
+                        rs.getBigDecimal(2), rs.getBigDecimal(3)))
+                .optional();
+    }
+
     // ---------------------------------------------------------------- campaigns
 
     @Override

@@ -94,6 +94,10 @@ public interface RateStore {
 
     List<EffectivePrice> effectivePrices(long organizationId, LocalDate date, String search);
 
+    /** The moderator fee and copay rule of a payer for an income level on a date (siiso-docs ADR 0024). */
+    java.util.Optional<com.siiso.billing.domain.CostSharingRule> costSharingRule(long organizationId, int level,
+                                                                                LocalDate date);
+
     // ---------------------------------------------------------------- campaigns (ADR 0023)
 
     /** What staff edit of a campaign. */

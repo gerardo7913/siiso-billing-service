@@ -34,7 +34,7 @@ server:
 
 siiso:
   business-db:
-    required-version: 8
+    required-version: 13
   security:
     jwt:
       issuer: siiso
